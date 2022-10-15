@@ -5,6 +5,7 @@ package e2e_test
 import (
 	"bytes"
 	"fmt"
+	"github.com/Masterminds/semver/v3"
 	"io"
 	"os"
 	"os/exec"
@@ -111,6 +112,16 @@ func TestE2E(t *testing.T) {
 				setupWorkdir(t, tc.workdir)
 
 				workdir := filepath.Join(tc.workdir, "refactored-code")
+
+				if outputFormat == "blocks" {
+					tfVer, err := terraform.NewRunner(workdir).Version()
+					if err != nil {
+						t.Fatalf("failed to get terraform version: %v", err)
+					}
+					if tfVer.LessThan(semver.MustParse("1.1")) {
+						t.Skip("terraform moves output format is only supported in terraform 1.1 and above")
+					}
+				}
 
 				args := append(tc.args, fmt.Sprintf("-output=%s", outputFormat))
 
