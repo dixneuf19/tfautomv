@@ -49,6 +49,13 @@ Confirm that tfautomv is properly installed:
 tfautomv -version
 ```
 
+## Terraform version compatibility
+
+`tfautomv` uses your local Terraform installation. The following version are supported:
+
+- from `0.12.x` to `1.0.x`, only with the `-output=commands` option, since _moved blocks_ are not supported in these versions
+- all Terraform version above `1.1.0`
+
 ## Next steps
 
 Follow the [guided tutorial]({{< relref "getting-started/tutorial.md" >}}) to become familiar with tfautomv.
