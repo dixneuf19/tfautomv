@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -98,50 +99,97 @@ func TestE2E(t *testing.T) {
 	binPath := buildBinary(t)
 
 	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip {
-				t.Skip(tc.skipReason)
-			}
 
-			setupWorkdir(t, tc.workdir)
+		for _, outputFormat := range []string{"blocks", "commands"} {
 
-			workdir := filepath.Join(tc.workdir, "refactored-code")
-
-			tfautomvCmd := exec.Command(binPath, tc.args...)
-			tfautomvCmd.Dir = workdir
-
-			var output bytes.Buffer
-			tfautomvCmd.Stdout = io.MultiWriter(&output, os.Stderr)
-			tfautomvCmd.Stderr = io.MultiWriter(&output, os.Stderr)
-
-			if err := tfautomvCmd.Run(); err != nil {
-				t.Fatalf("running tfautomv: %v", err)
-			}
-
-			outputStr := output.String()
-			t.Logf("full output:\n%q", outputStr)
-
-			for _, s := range tc.wantOutputInclude {
-				if !strings.Contains(outputStr, s) {
-					t.Errorf("output should contain %q but does not", s)
+			tcName := fmt.Sprintf("%s_output=%s", tc.name, outputFormat)
+			t.Run(tcName, func(t *testing.T) {
+				if tc.skip {
+					t.Skip(tc.skipReason)
 				}
-			}
-			for _, s := range tc.wantOutputExclude {
-				if strings.Contains(outputStr, s) {
-					t.Errorf("output should not contain %q but does", s)
+
+				setupWorkdir(t, tc.workdir)
+
+				workdir := filepath.Join(tc.workdir, "refactored-code")
+
+				args := append(tc.args, fmt.Sprintf("-output=%s", outputFormat))
+
+				tfautomvCmd := exec.Command(binPath, args...)
+				tfautomvCmd.Dir = workdir
+
+				var outputStdout bytes.Buffer
+				tfautomvCmd.Stdout = io.MultiWriter(&outputStdout, os.Stderr)
+
+				var outputStderr bytes.Buffer
+				tfautomvCmd.Stderr = io.MultiWriter(&outputStderr, os.Stderr)
+
+				if err := tfautomvCmd.Run(); err != nil {
+					t.Fatalf("running tfautomv: %v", err)
 				}
-			}
 
-			plan, err := terraform.NewRunner(workdir).Plan()
-			if err != nil {
-				t.Fatalf("terraform plan (after addings moves): %v", err)
-			}
+				outputStr := outputStdout.String() + outputStderr.String()
+				t.Logf("full output:\n%q", outputStr)
 
-			changes := plan.NumChanges()
-			if changes != tc.wantChanges {
-				t.Errorf("%d changes remaining, want %d", changes, tc.wantChanges)
-			}
-		})
+				for _, s := range tc.wantOutputInclude {
+					if !strings.Contains(outputStr, s) {
+						t.Errorf("output should contain %q but does not", s)
+					}
+				}
+				for _, s := range tc.wantOutputExclude {
+					if strings.Contains(outputStr, s) {
+						t.Errorf("output should not contain %q but does", s)
+					}
+				}
+
+				switch outputFormat {
+				case "blocks":
+					// nothing to do, integrated in moved blocks
+				case "commands":
+					// run terraform state mv commands
+
+					tfMvCmds := strings.Split(outputStdout.String(), "\n")
+
+					for _, tfMvCmd := range tfMvCmds {
+
+						// ignore empty lines, such as the last one
+						if tfMvCmd == "" {
+							continue
+						}
+
+						t.Logf("running %q", tfMvCmd)
+
+						cmdName := strings.Fields(tfMvCmd)[0]
+						args := strings.Fields(tfMvCmd)[1:]
+						// trim " around args
+						trimArgs := make([]string, 0, len(args))
+						for _, arg := range args {
+							trimArgs = append(trimArgs, strings.Trim(arg, "\""))
+						}
+
+						cmd := exec.Command(cmdName, trimArgs...)
+						cmd.Dir = workdir
+
+						var output bytes.Buffer
+						cmd.Stdout = io.MultiWriter(&output, os.Stderr)
+						cmd.Stderr = io.MultiWriter(&output, os.Stderr)
+
+						if err := cmd.Run(); err != nil {
+							t.Fatalf("running %q: %v", tfMvCmd, err)
+						}
+					}
+				}
+
+				plan, err := terraform.NewRunner(workdir).Plan()
+				if err != nil {
+					t.Fatalf("terraform plan (after addings moves): %v", err)
+				}
+
+				changes := plan.NumChanges()
+				if changes != tc.wantChanges {
+					t.Errorf("%d changes remaining, want %d", changes, tc.wantChanges)
+				}
+			})
+		}
 	}
 }
 
