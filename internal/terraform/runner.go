@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 
 	"github.com/Masterminds/semver/v3"
 )
@@ -63,7 +64,17 @@ func (r *runner) Version() (*semver.Version, error) {
 
 	var version Version
 	if err := json.Unmarshal(jsonVersion.Bytes(), &version); err != nil {
-		return nil, fmt.Errorf("could not parse version: %w", err)
+
+		// Fallback on parsing the version from the text output
+		// needed for Terraform <= 0.12
+
+		versionString := jsonVersion.String()
+		re := regexp.MustCompile(`^Terraform (v\d+\.\d+.\d+)\n`)
+		matches := re.FindStringSubmatch(versionString)
+		if len(matches) != 2 {
+			return nil, fmt.Errorf("could not parse version from output %q", versionString)
+		}
+		version.TerraformVersion = matches[1]
 	}
 
 	return semver.NewVersion(version.TerraformVersion)
